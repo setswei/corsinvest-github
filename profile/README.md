@@ -11,7 +11,7 @@
 | [cv4pve-pepper](https://github.com/Corsinvest/cv4pve-pepper) | SPICE remote-viewer client | ![](https://img.shields.io/github/stars/Corsinvest/cv4pve-pepper?style=flat-square) | ![](https://img.shields.io/github/downloads/Corsinvest/cv4pve-pepper/total?style=flat-square) |
 | [cv4pve-cli](https://github.com/Corsinvest/cv4pve-cli) | CLI for Proxmox VE API | ![](https://img.shields.io/github/stars/Corsinvest/cv4pve-cli?style=flat-square) | ![](https://img.shields.io/github/downloads/Corsinvest/cv4pve-cli/total?style=flat-square) |
 | [cv4pve-diag](https://github.com/Corsinvest/cv4pve-diag) | Diagnostic tool | ![](https://img.shields.io/github/stars/Corsinvest/cv4pve-diag?style=flat-square) | ![](https://img.shields.io/github/downloads/Corsinvest/cv4pve-diag/total?style=flat-square) |
-| [awesome-proxmox-ve](https://github.com/Corsinvest/awesome-proxmox-ve) | Curated Proxmox VE resources | ![](https://img.shields.io/github/stars/Corsinvest/awesome-proxmox-ve?style=flat-square) | — |
+| [awesome-proxmox-ve](https://github.com/Corsinvest/awesome-proxmox-ve) | Curated Proxmox VE resources | ![](https://img.shields.io/github/stars/Corsinvest/awesome-proxmox-ve?style=flat-square) |  |
 
 ## 📦 API Libraries
 
