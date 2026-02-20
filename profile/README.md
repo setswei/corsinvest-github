@@ -1,6 +1,6 @@
 # Corsinvest Srl
 
-**Corsinvest ❤️ Open Source** — Open source tools for Proxmox VE infrastructure management.
+**Corsinvest ❤️ Open Source**
 
 ## 🚀 Projects
 
