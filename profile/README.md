@@ -18,10 +18,10 @@
 
 ## 📦 API Libraries
 
-| Library | Language | Downloads |
-|---------|----------|-----------|
-| [cv4pve-api-dotnet](https://github.com/Corsinvest/cv4pve-api-dotnet) | C# / .NET | ![](https://img.shields.io/nuget/dt/Corsinvest.ProxmoxVE.Api?style=flat-square&logo=nuget) |
-| [cv4pve-api-powershell](https://github.com/Corsinvest/cv4pve-api-powershell) | PowerShell | ![](https://img.shields.io/powershellgallery/dt/Corsinvest.ProxmoxVE.Api?style=flat-square&logo=powershell) |
-| [cv4pve-api-php](https://github.com/Corsinvest/cv4pve-api-php) | PHP | ![](https://img.shields.io/packagist/dt/corsinvest/cv4pve-api-php?style=flat-square&logo=php) |
-| [cv4pve-api-javascript](https://github.com/Corsinvest/cv4pve-api-javascript) | JavaScript | ![](https://img.shields.io/npm/dt/@corsinvest/cv4pve-api-javascript?style=flat-square&logo=npm) |
-| [cv4pve-api-java](https://github.com/Corsinvest/cv4pve-api-java) | Java | ![](https://img.shields.io/github/downloads/Corsinvest/cv4pve-api-java/total?style=flat-square) |
+| Library | Language | Stars | Downloads |
+|---------|----------|-------|-----------|
+| [cv4pve-api-dotnet](https://github.com/Corsinvest/cv4pve-api-dotnet) | C# / .NET | ![](https://img.shields.io/github/stars/Corsinvest/cv4pve-api-dotnet?style=flat-square) | ![](https://img.shields.io/nuget/dt/Corsinvest.ProxmoxVE.Api?style=flat-square&logo=nuget) |
+| [cv4pve-api-powershell](https://github.com/Corsinvest/cv4pve-api-powershell) | PowerShell | ![](https://img.shields.io/github/stars/Corsinvest/cv4pve-api-powershell?style=flat-square) | ![](https://img.shields.io/powershellgallery/dt/Corsinvest.ProxmoxVE.Api?style=flat-square&logo=powershell) |
+| [cv4pve-api-php](https://github.com/Corsinvest/cv4pve-api-php) | PHP | ![](https://img.shields.io/github/stars/Corsinvest/cv4pve-api-php?style=flat-square) | ![](https://img.shields.io/packagist/dt/corsinvest/cv4pve-api-php?style=flat-square&logo=php) |
+| [cv4pve-api-javascript](https://github.com/Corsinvest/cv4pve-api-javascript) | JavaScript | ![](https://img.shields.io/github/stars/Corsinvest/cv4pve-api-javascript?style=flat-square) | ![](https://img.shields.io/npm/dt/@corsinvest/cv4pve-api-javascript?style=flat-square&logo=npm) |
+| [cv4pve-api-java](https://github.com/Corsinvest/cv4pve-api-java) | Java | ![](https://img.shields.io/github/stars/Corsinvest/cv4pve-api-java?style=flat-square) | ![](https://img.shields.io/github/downloads/Corsinvest/cv4pve-api-java/total?style=flat-square) |
