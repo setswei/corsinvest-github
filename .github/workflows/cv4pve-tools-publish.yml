@@ -402,9 +402,9 @@ jobs:
 
             rpmbuild -bb ~/rpmbuild/SPECS/${PKGNAME}.spec \
               --target "$arch" \
-              --define "_rpmfilename ${PKGNAME}-${VERSION}-${arch}.rpm"
+              --define "_rpmfilename ${PKGNAME}-${VERSION}-${arch}.rpm" \
+              --define "_rpmdir $(pwd)"
 
-            cp ~/rpmbuild/RPMS/${arch}/${PKGNAME}-${VERSION}-${arch}.rpm .
             echo "✅ Built ${PKGNAME}-${VERSION}-${arch}.rpm"
           done
 
