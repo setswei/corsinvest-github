@@ -1,0 +1,419 @@
+name: CV4PVE Tools Publish
+
+on:
+  workflow_call:
+    inputs:
+      project-name:
+        description: "Executable name (without extension)"
+        required: true
+        type: string
+      project-path:
+        description: "Path to main project (.csproj)"
+        required: true
+        type: string
+      dotnet-version:
+        description: ".NET SDK version"
+        required: false
+        default: "10.0.x"
+        type: string
+
+    secrets:
+        NUGET_API_KEY:
+          required: false
+        WINGET_TOKEN:
+          required: false
+        AUR_SSH_PRIVATE_KEY:
+          required: false
+
+env:
+  DOTNET_VERSION: ${{ inputs.dotnet-version }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Extract and validate version
+        id: version
+        run: |
+          PROJECT_VERSION=$(grep -oP '<Version>\K[^<]+' Directory.Build.props)
+          echo "Project version: $PROJECT_VERSION"
+
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Tag version: $TAG_VERSION"
+
+          if [ "$PROJECT_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ ERROR: Version mismatch!"
+            echo "   Directory.Build.props: $PROJECT_VERSION"
+            echo "   Git tag: v$TAG_VERSION"
+            exit 1
+          fi
+
+          echo "✅ Version validated: $PROJECT_VERSION"
+          echo "version=$PROJECT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          if [ ! -f "CHANGELOG.md" ]; then
+            exit 0
+          fi
+
+          NOTES=$(awk "/^## \[$VERSION\]/{found=1; next} /^## \[/{found=0} found{print}" CHANGELOG.md)
+
+          if [ -z "$NOTES" ]; then
+            exit 0
+          fi
+
+          echo "✅ Changelog section found for $VERSION"
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Build and archive for each platform
+        run: |
+          mkdir -p ./publish
+
+          declare -a platforms=(
+            "win-x64|${{ inputs.project-name }}.exe-win-x64.zip|7z a -tzip"
+            "win-x86|${{ inputs.project-name }}.exe-win-x86.zip|7z a -tzip"
+            "win-arm64|${{ inputs.project-name }}.exe-win-arm64.zip|7z a -tzip"
+            "linux-x64|${{ inputs.project-name }}-linux-x64.zip|zip -r"
+            "linux-arm|${{ inputs.project-name }}-linux-arm.zip|zip -r"
+            "linux-arm64|${{ inputs.project-name }}-linux-arm64.zip|zip -r"
+            "osx-x64|${{ inputs.project-name }}-osx-x64.zip|zip -r"
+            "osx-arm64|${{ inputs.project-name }}-osx-arm64.zip|zip -r"
+          )
+
+          for platform in "${platforms[@]}"; do
+            IFS='|' read -r rid filename archive_cmd <<< "$platform"
+
+            echo "Building for $rid..."
+            dotnet publish ${{ inputs.project-path }} \
+              -r $rid \
+              -c Release \
+              --self-contained true \
+              -p:PublishSingleFile=true \
+              -p:DebugType=embedded \
+              -p:DebugSymbols=true \
+              -o ./publish/$rid
+
+            echo "Archiving $filename..."
+            cd ./publish/$rid
+            if [[ "$rid" == win-* ]]; then
+              exe_name="${{ inputs.project-name }}.exe"
+            else
+              exe_name="${{ inputs.project-name }}"
+            fi
+            $archive_cmd "../../$filename" "$exe_name"
+            cd ../..
+          done
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release v${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: ${{ steps.changelog.outputs.notes }}
+          files: |
+            ./${{ inputs.project-name }}*.zip
+
+      - name: Build and publish NuGet
+        run: |
+          if [ ! -f "packaging/nuget/project-path" ]; then
+            exit 0
+          fi
+
+          NUGET_PROJECT=$(cat packaging/nuget/project-path | tr -d '[:space:]')
+          echo "✅ Publishing NuGet package: $NUGET_PROJECT"
+
+          dotnet build $NUGET_PROJECT -c Release
+          dotnet pack $NUGET_PROJECT -c Release --no-build --output ./nuget-packages
+
+          for package in ./nuget-packages/*.nupkg; do
+            dotnet nuget push $package \
+              --api-key ${{ secrets.NUGET_API_KEY }} \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done
+
+  winget:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check identifier exists
+        id: check
+        run: |
+          if [ -f "packaging/winget/identifier" ]; then
+            IDENTIFIER=$(cat packaging/winget/identifier | tr -d '[:space:]')
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "identifier=$IDENTIFIER" >> $GITHUB_OUTPUT
+          else
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish to WinGet
+        if: steps.check.outputs.skip == 'false'
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: ${{ steps.check.outputs.identifier }}
+          installers-regex: '${{ inputs.project-name }}\.exe-win-(x64|x86|arm64)\.zip$'
+          token: ${{ secrets.WINGET_TOKEN }}
+          fork-user: ${{ github.repository_owner }}
+        continue-on-error: true
+
+  aur:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check PKGBUILD exists
+        id: check
+        run: |
+          if [ -f "packaging/aur/PKGBUILD" ]; then
+            PKGNAME=$(grep -oP '^pkgname=\K.+' packaging/aur/PKGBUILD)
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "pkgname=$PKGNAME" >> $GITHUB_OUTPUT
+          else
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get version and sha256sums
+        if: steps.check.outputs.skip == 'false'
+        id: info
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          REPO="${{ github.repository }}"
+
+          SHA_X64=$(gh api repos/$REPO/releases/tags/v$VERSION \
+            --jq '.assets[] | select(.name | endswith("linux-x64.zip")) | .digest' \
+            | sed 's/sha256://')
+          SHA_ARM64=$(gh api repos/$REPO/releases/tags/v$VERSION \
+            --jq '.assets[] | select(.name | endswith("linux-arm64.zip")) | .digest' \
+            | sed 's/sha256://')
+          SHA_ARM=$(gh api repos/$REPO/releases/tags/v$VERSION \
+            --jq '.assets[] | select(.name | endswith("linux-arm.zip") and (.name | endswith("linux-arm64.zip") | not)) | .digest' \
+            | sed 's/sha256://')
+
+          echo "sha_x64=$SHA_X64" >> $GITHUB_OUTPUT
+          echo "sha_arm64=$SHA_ARM64" >> $GITHUB_OUTPUT
+          echo "sha_arm=$SHA_ARM" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Update PKGBUILD
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          sed -i "s/^pkgver=.*/pkgver=${{ steps.info.outputs.version }}/" packaging/aur/PKGBUILD
+          sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${{ steps.info.outputs.sha_x64 }}')/" packaging/aur/PKGBUILD
+          sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${{ steps.info.outputs.sha_arm64 }}')/" packaging/aur/PKGBUILD
+          sed -i "s/^sha256sums_armv7h=.*/sha256sums_armv7h=('${{ steps.info.outputs.sha_arm }}')/" packaging/aur/PKGBUILD
+
+      - name: Publish to AUR
+        if: steps.check.outputs.skip == 'false'
+        uses: KSXGitHub/github-actions-deploy-aur@v3
+        with:
+          pkgname: ${{ steps.check.outputs.pkgname }}
+          pkgbuild: ./packaging/aur/PKGBUILD
+          commit_username: Corsinvest
+          commit_email: corsinvest@corsinvest.it
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to v${{ steps.info.outputs.version }}"
+          ssh_keyscan_types: rsa,ecdsa,ed25519
+
+  deb:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check control exists
+        id: check
+        run: |
+          if [ -f "packaging/deb/control" ]; then
+            echo "skip=false" >> $GITHUB_OUTPUT
+          else
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get version
+        if: steps.check.outputs.skip == 'false'
+        id: info
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download linux binaries from release
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.info.outputs.version }}"
+          PKGNAME="${{ inputs.project-name }}"
+
+          gh release download "v${VERSION}" \
+            --pattern "${PKGNAME}-linux-x64.zip" \
+            --pattern "${PKGNAME}-linux-arm64.zip" \
+            --pattern "${PKGNAME}-linux-arm.zip" \
+            --dir ./release-assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build deb packages
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          echo "✅ Building deb packages"
+          VERSION="${{ steps.info.outputs.version }}"
+          PKGNAME="${{ inputs.project-name }}"
+
+          declare -a deb_platforms=(
+            "${PKGNAME}-linux-x64.zip|amd64"
+            "${PKGNAME}-linux-arm64.zip|arm64"
+            "${PKGNAME}-linux-arm.zip|armhf"
+          )
+
+          for entry in "${deb_platforms[@]}"; do
+            IFS='|' read -r zipfile arch <<< "$entry"
+
+            echo "Building .deb for $arch..."
+            EXTRACT_DIR="./extract/${arch}"
+            DEB_DIR="./deb-build/${arch}"
+            INSTALL_DIR="${DEB_DIR}/usr/bin"
+            DEBIAN_DIR="${DEB_DIR}/DEBIAN"
+
+            mkdir -p "$EXTRACT_DIR" "$INSTALL_DIR" "$DEBIAN_DIR"
+
+            unzip -q "./release-assets/${zipfile}" -d "$EXTRACT_DIR"
+            cp "${EXTRACT_DIR}/${PKGNAME}" "${INSTALL_DIR}/${PKGNAME}"
+            chmod 755 "${INSTALL_DIR}/${PKGNAME}"
+
+            sed \
+              -e "s/^Version: .*/Version: ${VERSION}/" \
+              -e "s/^Architecture: .*/Architecture: ${arch}/" \
+              packaging/deb/control > "${DEBIAN_DIR}/control"
+
+            dpkg-deb --build "$DEB_DIR" "./${PKGNAME}-${VERSION}-${arch}.deb"
+            echo "✅ Built ${PKGNAME}-${VERSION}-${arch}.deb"
+          done
+
+      - name: Upload deb packages to release
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.info.outputs.version }}"
+          PKGNAME="${{ inputs.project-name }}"
+
+          gh release upload "v${VERSION}" ./${PKGNAME}-${VERSION}-*.deb --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  rpm:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check spec exists
+        id: check
+        run: |
+          if [ -f "packaging/rpm/spec" ]; then
+            echo "skip=false" >> $GITHUB_OUTPUT
+          else
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get version
+        if: steps.check.outputs.skip == 'false'
+        id: info
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Install rpmbuild
+        if: steps.check.outputs.skip == 'false'
+        run: sudo apt-get install -y rpm
+
+      - name: Download linux binaries from release
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.info.outputs.version }}"
+          PKGNAME="${{ inputs.project-name }}"
+
+          gh release download "v${VERSION}" \
+            --pattern "${PKGNAME}-linux-x64.zip" \
+            --pattern "${PKGNAME}-linux-arm64.zip" \
+            --pattern "${PKGNAME}-linux-arm.zip" \
+            --dir ./release-assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build rpm packages
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          echo "✅ Building rpm packages"
+          VERSION="${{ steps.info.outputs.version }}"
+          PKGNAME="${{ inputs.project-name }}"
+          declare -a rpm_platforms=(
+            "${PKGNAME}-linux-x64.zip|x86_64"
+            "${PKGNAME}-linux-arm64.zip|aarch64"
+            "${PKGNAME}-linux-arm.zip|armv7hl"
+          )
+
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+          for entry in "${rpm_platforms[@]}"; do
+            IFS='|' read -r zipfile arch <<< "$entry"
+
+            echo "Building .rpm for $arch..."
+            EXTRACT_DIR="./extract/${arch}"
+            mkdir -p "$EXTRACT_DIR"
+
+            unzip -q "./release-assets/${zipfile}" -d "$EXTRACT_DIR"
+            cp "${EXTRACT_DIR}/${PKGNAME}" ~/rpmbuild/SOURCES/${PKGNAME}
+            chmod 755 ~/rpmbuild/SOURCES/${PKGNAME}
+
+            sed "s/^Version: .*/Version: ${VERSION}/" packaging/rpm/spec > ~/rpmbuild/SPECS/${PKGNAME}.spec
+
+            rpmbuild -bb ~/rpmbuild/SPECS/${PKGNAME}.spec \
+              --target "$arch" \
+              --define "_rpmfilename ${PKGNAME}-${VERSION}-${arch}.rpm"
+
+            cp ~/rpmbuild/RPMS/${arch}/${PKGNAME}-${VERSION}-${arch}.rpm .
+            echo "✅ Built ${PKGNAME}-${VERSION}-${arch}.rpm"
+          done
+
+      - name: Upload rpm packages to release
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.info.outputs.version }}"
+          PKGNAME="${{ inputs.project-name }}"
+
+          gh release upload "v${VERSION}" ./${PKGNAME}-${VERSION}-*.rpm --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
