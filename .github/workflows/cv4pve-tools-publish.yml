@@ -417,3 +417,87 @@ jobs:
           gh release upload "v${VERSION}" ./${PKGNAME}-${VERSION}-*.rpm --clobber
         env:
           GH_TOKEN: ${{ github.token }}
+
+  pkg-macos:
+    needs: publish
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check identifier exists
+        id: check
+        run: |
+          if [ -f "packaging/pkg/identifier" ]; then
+            IDENTIFIER=$(cat packaging/pkg/identifier | tr -d '[:space:]')
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "identifier=$IDENTIFIER" >> $GITHUB_OUTPUT
+          else
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get version
+        if: steps.check.outputs.skip == 'false'
+        id: info
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download macOS binaries from release
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.info.outputs.version }}"
+          PKGNAME="${{ inputs.project-name }}"
+
+          gh release download "v${VERSION}" \
+            --pattern "${PKGNAME}-osx-x64.zip" \
+            --pattern "${PKGNAME}-osx-arm64.zip" \
+            --dir ./release-assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build macOS pkg packages
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          echo "✅ Building macOS pkg packages"
+          VERSION="${{ steps.info.outputs.version }}"
+          PKGNAME="${{ inputs.project-name }}"
+          IDENTIFIER="${{ steps.check.outputs.identifier }}"
+
+          declare -a pkg_platforms=(
+            "${PKGNAME}-osx-x64.zip|x86_64"
+            "${PKGNAME}-osx-arm64.zip|arm64"
+          )
+
+          for entry in "${pkg_platforms[@]}"; do
+            IFS='|' read -r zipfile arch <<< "$entry"
+
+            echo "Building .pkg for $arch..."
+            EXTRACT_DIR="./extract/${arch}"
+            PAYLOAD_DIR="./payload/${arch}/usr/local/bin"
+
+            mkdir -p "$EXTRACT_DIR" "$PAYLOAD_DIR"
+
+            unzip -q "./release-assets/${zipfile}" -d "$EXTRACT_DIR"
+            cp "${EXTRACT_DIR}/${PKGNAME}" "${PAYLOAD_DIR}/${PKGNAME}"
+            chmod 755 "${PAYLOAD_DIR}/${PKGNAME}"
+
+            pkgbuild \
+              --root "./payload/${arch}" \
+              --identifier "${IDENTIFIER}" \
+              --version "${VERSION}" \
+              --install-location "/" \
+              "./${PKGNAME}-${VERSION}-${arch}.pkg"
+
+            echo "✅ Built ${PKGNAME}-${VERSION}-${arch}.pkg"
+          done
+
+      - name: Upload pkg packages to release
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.info.outputs.version }}"
+          PKGNAME="${{ inputs.project-name }}"
+
+          gh release upload "v${VERSION}" ./${PKGNAME}-${VERSION}-*.pkg --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
