@@ -210,17 +210,17 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-          REPO="${{ github.repository }}"
+          PKGNAME="${{ inputs.project-name }}"
 
-          SHA_X64=$(gh api repos/$REPO/releases/tags/v$VERSION \
-            --jq '.assets[] | select(.name | endswith("linux-x64.zip")) | .digest' \
-            | sed 's/sha256://')
-          SHA_ARM64=$(gh api repos/$REPO/releases/tags/v$VERSION \
-            --jq '.assets[] | select(.name | endswith("linux-arm64.zip")) | .digest' \
-            | sed 's/sha256://')
-          SHA_ARM=$(gh api repos/$REPO/releases/tags/v$VERSION \
-            --jq '.assets[] | select(.name | endswith("linux-arm.zip") and (.name | endswith("linux-arm64.zip") | not)) | .digest' \
-            | sed 's/sha256://')
+          gh release download "v${VERSION}" \
+            --pattern "${PKGNAME}-linux-x64.zip" \
+            --pattern "${PKGNAME}-linux-arm64.zip" \
+            --pattern "${PKGNAME}-linux-arm.zip" \
+            --dir ./aur-assets
+
+          SHA_X64=$(sha256sum "./aur-assets/${PKGNAME}-linux-x64.zip" | awk '{print $1}')
+          SHA_ARM64=$(sha256sum "./aur-assets/${PKGNAME}-linux-arm64.zip" | awk '{print $1}')
+          SHA_ARM=$(sha256sum "./aur-assets/${PKGNAME}-linux-arm.zip" | awk '{print $1}')
 
           echo "sha_x64=$SHA_X64" >> $GITHUB_OUTPUT
           echo "sha_arm64=$SHA_ARM64" >> $GITHUB_OUTPUT
