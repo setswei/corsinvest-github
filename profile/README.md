@@ -1,7 +1,3 @@
-# Corsinvest Srl
-
-**Corsinvest ❤️ Open Source**
-
 ## 🚀 Projects
 
 | Project | Description | Stars | Downloads |
