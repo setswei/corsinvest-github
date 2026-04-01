@@ -501,3 +501,97 @@ jobs:
           gh release upload "v${VERSION}" ./${PKGNAME}-${VERSION}-*.pkg --clobber
         env:
           GH_TOKEN: ${{ github.token }}
+
+  homebrew:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check homebrew config exists
+        id: check
+        run: |
+          if [ -f "packaging/homebrew/tap" ]; then
+            FORMULA_CLASS=$(grep '^formula-class=' packaging/homebrew/tap | cut -d= -f2-)
+            DESCRIPTION=$(grep '^description=' packaging/homebrew/tap | cut -d= -f2-)
+            TAP=$(grep '^tap=' packaging/homebrew/tap | cut -d= -f2-)
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "formula_class=$FORMULA_CLASS" >> $GITHUB_OUTPUT
+            echo "description=$DESCRIPTION" >> $GITHUB_OUTPUT
+            echo "tap_repo=$TAP" >> $GITHUB_OUTPUT
+          else
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get version
+        if: steps.check.outputs.skip == 'false'
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Download release assets
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          PKGNAME="${{ inputs.project-name }}"
+
+          gh release download "v${VERSION}" \
+            --pattern "${PKGNAME}-osx-x64.zip" \
+            --pattern "${PKGNAME}-osx-arm64.zip" \
+            --dir ./release-assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Calculate SHA256
+        if: steps.check.outputs.skip == 'false'
+        id: sha
+        run: |
+          echo "SHA_X64=$(sha256sum ./release-assets/${{ inputs.project-name }}-osx-x64.zip | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "SHA_ARM64=$(sha256sum ./release-assets/${{ inputs.project-name }}-osx-arm64.zip | awk '{print $1}')" >> $GITHUB_OUTPUT
+
+      - name: Create Homebrew formula
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          PKGNAME="${{ inputs.project-name }}"
+          cat > "${PKGNAME}.rb" << EOF
+          class ${{ steps.check.outputs.formula_class }} < Formula
+            desc "${{ steps.check.outputs.description }}"
+            homepage "https://github.com/${{ github.repository }}"
+            version "${{ steps.version.outputs.VERSION }}"
+            license "GPL-3.0"
+
+            on_macos do
+              on_intel do
+                url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${PKGNAME}-osx-x64.zip"
+                sha256 "${{ steps.sha.outputs.SHA_X64 }}"
+              end
+              on_arm do
+                url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${PKGNAME}-osx-arm64.zip"
+                sha256 "${{ steps.sha.outputs.SHA_ARM64 }}"
+              end
+            end
+
+            def install
+              bin.install "${PKGNAME}"
+            end
+
+            test do
+              assert_match "${PKGNAME}", shell_output("#{bin}/${PKGNAME} --version")
+            end
+          end
+          EOF
+
+      - name: Push to Homebrew tap
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          PKGNAME="${{ inputs.project-name }}"
+          TAP_REPO="${{ steps.check.outputs.tap_repo }}"
+          git clone "https://x-access-token:${{ secrets.HOMEBREW_TAP_TOKEN }}@github.com/${TAP_REPO}.git" homebrew-tap
+          cd homebrew-tap
+          mkdir -p Formula
+          mv "../${PKGNAME}.rb" Formula/
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "Formula/${PKGNAME}.rb"
+          git commit -m "Update ${PKGNAME} to ${{ steps.version.outputs.VERSION }}"
+          git push
