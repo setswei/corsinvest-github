@@ -521,6 +521,7 @@ jobs:
             echo "formula_class=$FORMULA_CLASS" >> $GITHUB_OUTPUT
             echo "description=$DESCRIPTION" >> $GITHUB_OUTPUT
             echo "tap_repo=$TAP" >> $GITHUB_OUTPUT
+            echo "license=$LICENSE" >> $GITHUB_OUTPUT
           else
             echo "skip=true" >> $GITHUB_OUTPUT
           fi
