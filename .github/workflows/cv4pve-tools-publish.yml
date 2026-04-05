@@ -516,6 +516,7 @@ jobs:
             FORMULA_CLASS=$(grep '^formula-class=' packaging/homebrew/tap | cut -d= -f2-)
             DESCRIPTION=$(grep '^description=' packaging/homebrew/tap | cut -d= -f2-)
             TAP=$(grep '^tap=' packaging/homebrew/tap | cut -d= -f2-)
+            LICENSE=$(grep '^license=' packaging/homebrew/tap | cut -d= -f2-)
             echo "skip=false" >> $GITHUB_OUTPUT
             echo "formula_class=$FORMULA_CLASS" >> $GITHUB_OUTPUT
             echo "description=$DESCRIPTION" >> $GITHUB_OUTPUT
